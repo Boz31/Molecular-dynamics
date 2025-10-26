@@ -5,3 +5,5 @@ First, it should be noted that single crystals can be modeled directly in LAMMPS
 
 [Single_crack] is an MD simulation of crack propagation in a nickel single crystal, with detailed comments in Chinese. It can serve as one of the best starting points for learning molecular dynamics.
 Professor Bin Shan from Huazhong University of Science and Technology has provided a detailed tutorial video on Bilibili (BV1amyzYJEYE).
+
+[in.uniaxial_load.lmp] is an MD script that simulates uniaxial loading. By controlling the sign of the applied load, it can perform either tension or compression. The script incorporates a von Mises distribution and can output the corresponding stress–strain curve.

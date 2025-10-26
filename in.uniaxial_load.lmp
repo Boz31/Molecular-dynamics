@@ -1,0 +1,145 @@
+# Script made by Bohao Zhou
+# ---------- Initialize Simulation ---------------------
+clear
+units metal
+dimension 3
+boundary p p p
+atom_style atomic
+atom_modify map array
+
+# ---------- define variables ---------------------
+variable stemperature equal 1000 # temperature in kelvin
+variable epercentage equal 0.40 # the percentage the body is compressed
+variable myseed equal 88888888 # the value seed for the velocity
+variable atomrate equal 2500 # the rate in timestep that atoms are dump as CFG
+variable time_step equal 0.001 # time step in pico seconds
+variable time_eq equal 10000 # time steps for the equlibration part
+
+variable tdamp equal "v_time_step*100" # DO NOT CHANGE
+variable pdamp equal "v_time_step*1000" # DO NOT CHANGE
+
+variable R equal 0.005 # ERATE here 0.005 1/ps every picosecond
+
+# time for the deformation part (DO NOT CHANGE)
+variable time_run equal "(v_epercentage/v_R)/v_time_step"
+
+timestep ${time_step} # DO NOT CHANGE
+
+# ---------- Reading model ---------------------
+
+
+read_data
+
+
+
+# ---------- Define Interatomic Potential ---------------------
+pair_style meam
+pair_coeff
+
+# ---------- Define Settings ----------------------------------
+
+compute myCN all cna/atom 1.96
+compute myKE all ke/atom
+compute myPE all pe/atom
+
+compute csym all centro/atom fcc
+# compute peratom all pe/atom 
+compute s all stress/atom NULL
+compute vol all voronoi/atom
+variable von_press atom sqrt(0.5*((c_s[1]-c_s[2])^2+(c_s[1]-c_s[3])^2+(c_s[2]-c_s[3])^2+6*(c_s[4]^2+c_s[5]^2+c_s[6]^2)))/10000/c_vol[1]
+
+# ---------- Equilibration ---------------------------------------
+thermo_modify lost ignore
+
+reset_timestep 0
+velocity all create ${stemperature} ${myseed} mom yes rot no
+
+fix equilibration all npt temp ${stemperature} ${stemperature} ${tdamp} iso 0 0 ${pdamp} drag 1
+
+# Output thermodynamics into outputfile
+# for units metal, pressure is in [bars] = 100 [kPa] = 1/10000 [GPa] p2, p3, p4 are in GPa
+variable eq1 equal "step"
+variable eq2 equal "pxx/1000"
+variable eq3 equal "pyy/100"
+variable eq4 equal "pzz/10"
+variable eq5 equal "lx"
+variable eq6 equal "ly"
+variable eq7 equal "lz"
+variable eq8 equal "temp"
+variable eq9 equal "etotal"
+
+fix output1 all print 100 "${eq1} ${eq2} ${eq3} ${eq4} ${eq5} ${eq6} ${eq7} ${eq8} ${eq9}" file run.${stemperature}K.out screen no
+
+thermo 100
+thermo_style custom step pxx pyy pzz lx ly lz temp etotal
+
+# Use cfg for AtomEye (here only print the coordinates of the atoms)
+dump 1 all custom 100 dump mass type xs ys zs id c_myPE c_myKE
+
+# RUN AT LEAST 10000 timesteps
+run ${time_eq}
+
+# Store final cell length for strain calculations
+variable tmp equal "lz"
+variable L0 equal ${tmp}
+print "Initial Length, L0: ${L0}"
+
+# reset
+unfix equilibration
+undump 1
+unfix output1
+
+# ---------- Deformation ---------------------------------
+
+reset_timestep 0
+
+# In our simulations We seek to control the lateral boundaries
+# Ly and Lz, i.e When the computational box is stretched,
+# the contraction or transverse strain perpendicular to the
+# load is zero
+
+fix 1 all nvt temp ${stemperature} ${stemperature} ${tdamp} drag 0.0
+fix 2 all deform 1 y erate -${R} units box remap v
+
+# IMPORTANT NOTE: When non-equilibrium MD (NEMD) simulations are
+# performed using this fix, the option "remap v" should normally
+# be used. This is because fix nvt/sllod adjusts the atom positions
+# and velocities to induce a velocity profile that matches the
+# changing box size/shape. Thus atom coordinates should NOT be
+# remapped by fix deform, but velocities SHOULD be when atoms cross
+# periodic boundaries, since that is consistent with maintaining
+# the velocity profile already created by fix nvt/sllod. LAMMPS
+# will warn you if the remap setting is not consistent with fix nvt/sllod.
+
+
+variable strain equal "-(lz - v_L0)/v_L0"
+variable shear equal "0.5*(pzz/1000 - 0.5*(pyy/1000 + pxx/1000))"
+variable tstep equal "step"
+variable mypxx equal "pxx/1000"
+variable mypyy equal "pyy/100"
+variable mypzz equal "pzz/10"
+variable mylx equal "lx"
+variable myly equal "ly"
+variable mylz equal "lz"
+variable mytemp equal "temp"
+
+fix def1 all print 10 "${strain} ${mypxx} ${mypyy} ${mypzz} ${shear} ${mylx} ${myly} ${mylz} ${mytemp}" file Tia2nanostress.${stemperature}K.${epercentage}e.out screen no
+
+# Use cfg for AtomEye
+dump 1 all custom 100 dump.Ti0 mass type xs ys zs id c_myPE c_myKE c_myCN v_von_press
+
+# Display thermo
+variable thermostep equal "v_time_run/1"
+thermo ${thermostep}
+thermo_style custom "v_strain" pxx pyy pzz lx ly lz temp etotal pe ke
+run ${time_run}
+
+unfix def1
+unfix 1
+unfix 2
+
+# SAVE THE DATA OF THE CALCULATION OR ELSE YOU NEED TO START OVER
+write_restart restart.equil
+# SIMULATION DONE
+clear
+print "have a nice day =)"
